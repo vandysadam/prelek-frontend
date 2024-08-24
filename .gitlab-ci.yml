@@ -1,0 +1,100 @@
+# Project specific script
+# 1. Make sure branch staging is protected
+
+# 2. Required variables/files to be set:
+# - [file] ENV (staging and production)
+# - [variable] PUSH_TOKEN
+# - [variable] HOST_PORT
+# - [variable] DOCKER_PORT
+
+# 3. Tags:
+# Build server: vultra-build-server
+# Deployment server: check no 4.
+
+# 4. Set tags for staging/production server
+
+# 5. Modify project specific ci/id
+.project_variables:
+  before_script:
+    - cat "$ENV" > "./.env"
+
+# Global settings, do not edit
+.docker_variables:
+  before_script:
+    - echo $PUSH_TOKEN | docker login -u gitlab-ci-token --password-stdin registry.gitlab.com
+    - export DOCKER_RUNNER_REPO=$DOCKER_RUNNER_REPO
+    - export HOST_PORT=$HOST_PORT
+    - export DOCKER_PORT=$DOCKER_PORT
+
+variables:
+  DOCKER_RUNNER_REPO: "$CI_REGISTRY_IMAGE/$CI_COMMIT_BRANCH:latest"
+  LOCAL_BUILDER_REPO: "127.0.0.1:5000/$CI_REGISTRY_IMAGE/builder:latest"
+  LOCAL_RUNNER_REPO: "127.0.0.1:5000/$CI_REGISTRY_IMAGE/$CI_COMMIT_BRANCH:latest"
+
+.build_and_push_image:
+  extends: .project_variables
+  resource_group: $CI_COMMIT_BRANCH
+  stage: push_image
+  tags:
+    - vultra-build-server
+  script:
+    # Build for local cache
+    - docker buildx build --target="builder" --tag="$LOCAL_BUILDER_REPO" .
+    # Push to local repository
+    - docker push "$LOCAL_BUILDER_REPO"
+    # Login to gitlab image repository
+    - echo $PUSH_TOKEN | docker login -u gitlab-ci-token --password-stdin registry.gitlab.com
+    # Build target runner with local cache
+    - docker buildx build --target="runner" --cache-from="$LOCAL_BUILDER_REPO" --cache-from="$LOCAL_RUNNER_REPO" --tag="$LOCAL_RUNNER_REPO" --tag="$DOCKER_RUNNER_REPO" .
+    # Push runner to gitlab image repository
+    - docker push "$DOCKER_RUNNER_REPO"
+    # Push runner to local image repository
+    - docker push "$LOCAL_RUNNER_REPO"
+
+.deploy_to_server:
+  extends: .docker_variables
+  resource_group: $CI_COMMIT_BRANCH
+  cache: []
+  image: alpine
+  script:
+    - export DOCKER_RUNNER_REPO=$DOCKER_RUNNER_REPO
+    - docker compose pull
+    - docker compose up -d --no-build
+
+stages:
+  - build_and_push_image
+  - deploy_to_server
+
+# Staging
+staging/build and push image:
+  extends: .build_and_push_image
+  stage: build_and_push_image
+  environment: staging
+  only:
+    - staging
+
+staging/deploy to server:
+  extends: .deploy_to_server
+  stage: deploy_to_server
+  environment: staging
+  tags:
+    - contag-staging
+  only:
+    - staging
+
+# Production
+production/build and push image:
+  extends: .build_and_push_image
+  stage: build_and_push_image
+  environment: production
+  only:
+    - main
+
+production/deploy to server:
+  extends: .deploy_to_server
+  stage: deploy_to_server
+  environment: production
+  tags:
+    - contag-production
+  only:
+    - main

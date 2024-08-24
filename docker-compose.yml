@@ -1,0 +1,7 @@
+version: "1.0"
+services:
+  web:
+    build: .
+    ports:
+      - "${HOST_PORT}:${DOCKER_PORT}"
+    image: "${DOCKER_RUNNER_REPO}"

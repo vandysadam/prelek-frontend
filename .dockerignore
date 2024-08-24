@@ -1,0 +1,7 @@
+dist/
+.git
+.yarn/
+deploy.sh
+ecosystem.config.js
+README.md
+node_modules
